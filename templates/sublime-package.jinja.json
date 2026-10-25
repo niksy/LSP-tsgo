@@ -41,8 +41,8 @@
                     },
                     "runExternalCode": {
                       "type": "boolean",
-                      "default": false,
-                      "markdownDescription": "Run external code, such as the content mappers in the `contentMappers` field of a tsconfig and the ones that other packages contribute (e.g. Vue support in LSP-vue).\n\n> [!WARNING]\n> Content mappers of a tsconfig run code from the project's `node_modules`. Only enable this for projects that you trust, for example in the project settings."
+                      "default": true,
+                      "markdownDescription": "Run external code, such as the content mappers in the `contentMappers` field of a tsconfig and the ones that other packages contribute (e.g. Vue support in LSP-vue).\n\n> [!WARNING]\n> Content mappers of a tsconfig run code from the project's `node_modules`. Disable this for projects that you don't trust, for example in the project settings."
                     }
                   }
                 },

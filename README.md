@@ -16,7 +16,7 @@ Open the configuration file using the Command Palette `Preferences: LSP-tsgo Set
 
 ## Content mappers
 
-TypeScript 7.1 can type-check other file types, such as Vue single-file components, through the content mappers in the `contentMappers` field of a tsconfig. Content mappers run code from the project's `node_modules`, so they are disabled by default. Enable them for a trusted project in its `.sublime-project` file:
+TypeScript 7.1 can type-check other file types, such as Vue single-file components, through the content mappers in the `contentMappers` field of a tsconfig. Content mappers are enabled by default. They run code from the project's `node_modules`, so disable them for projects that you don't trust, in the `.sublime-project` file:
 
 ```jsonc
 {
@@ -24,7 +24,7 @@ TypeScript 7.1 can type-check other file types, such as Vue single-file componen
         "LSP": {
             "LSP-tsgo": {
                 "initialization_options": {
-                    "runExternalCode": true
+                    "runExternalCode": false
                 }
             }
         }
@@ -47,7 +47,7 @@ Other packages, such as [LSP-vue](https://packagecontrol.io/packages/LSP-vue), c
         "location": "${storage_path}/LSP-vue/server/node_modules/",
         // File extensions that the content mapper handles.
         "extensions": [".vue"],
-        // Views that this server attaches to when `runExternalCode` is enabled.
+        // Views that this server attaches to, unless `runExternalCode` is disabled.
         "selector": "text.html.vue",
         // Content mapper options for files outside any tsconfig.
         "options": { "format": "sfc" }

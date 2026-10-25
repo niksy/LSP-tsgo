@@ -138,6 +138,7 @@ class LspTsgoPlugin(LspPlugin):
         if super().is_applicable_async(context):
             return True
         # Content mappers only run with `runExternalCode`, so other files are left to their own servers without it.
+        # It is enabled by default.
         if not context.configuration.initialization_options.get('runExternalCode'):
             return False
         scheme, _ = parse_uri(uri_from_view(context.view))
