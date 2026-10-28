@@ -1,16 +1,23 @@
 from __future__ import annotations
 
 from LSP.plugin import ClientRequest
+from LSP.plugin import Error
 from LSP.plugin import LspPlugin
+from LSP.plugin import LspTextCommand
 from LSP.plugin import OnPreStartContext
 from LSP.plugin import position_to_offset
 from LSP.plugin import Promise
+from LSP.plugin import Request
 from LSP.plugin import ServerResponse
 from LSP.plugin import Session
+from LSP.plugin import text_document_position_params
 from LSP.plugin import uri_handler
 from LSP.protocol import DocumentUri
 from LSP.protocol import Hover
 from LSP.protocol import HoverParams
+from LSP.protocol import Location
+from LSP.protocol import LocationLink
+from LSP.protocol import TextDocumentPositionParams
 from lsp_utils import NodeManager
 from pathlib import Path
 from sublime_lib import ResourcePath
@@ -120,3 +127,59 @@ class VerbosityHoverHandler:
             view = session_buffer.get_view_in_group()
             point = position_to_offset(view, hover_params['position'])
             view.run_command('lsp_hover', {'point': point})
+
+
+
+
+class LspTsgoGotoSourceDefinitionCommand(LspTextCommand):
+    """Go to the implementation behind a declaration file.
+
+    With `fallback` (the default) the ordinary definition is used when the server has no source
+    definition to offer, e.g. the symbol already lives in TypeScript source, or the server predates
+    the request. The command is then always safe to bind in place of `lsp_symbol_definition`.
+    """
+
+    SOURCE_DEFINITION_METHOD = 'custom/textDocument/sourceDefinition'
+    SOURCE_DEFINITION_CAPABILITY = 'experimental.customSourceDefinitionProvider'
+
+    capability = 'definitionProvider'
+
+    def run(
+        self, _: sublime.Edit, event: dict[str, int] | None = None, point: int | None = None, fallback: bool = True
+    ) -> None:
+        if point is None and event and 'x' in event and 'y' in event:
+            point = self.view.window_to_text((event['x'], event['y']))
+        position = point if point is not None else next((r.b for r in self.view.sel()), None)
+        session = self.best_session(self.SOURCE_DEFINITION_CAPABILITY, position)
+        if session is None or position is None:
+            self._fallback(fallback)
+            return
+        params = text_document_position_params(self.view, position)
+        request: Request[Any, Location | list[Location] | list[LocationLink] | None] = Request(
+            self.SOURCE_DEFINITION_METHOD, params, self.view, progress=True
+        )
+        session.send_request_task(request) \
+            .then(lambda response: self._on_result_async(session, params, fallback, response))
+
+    def _on_result_async(
+        self,
+        session: Session,
+        params: TextDocumentPositionParams,
+        fallback: bool,
+        response: Location | list[Location] | list[LocationLink] | Error | None,
+    ) -> None:
+        if not response or isinstance(response, Error):
+            self._fallback(fallback)
+            return
+        locations = response if isinstance(response, list) else [response]
+        # Handled by LSP itself: opens a single location directly, or shows the location picker.
+        session.execute_command({
+            'command': 'editor.action.showReferences',
+            'arguments': [params['textDocument']['uri'], params['position'], locations],
+        }, view=self.view)
+
+    def _fallback(self, fallback: bool) -> None:
+        if not fallback:
+            sublime.status_message('No source definition found')
+            return
+        self.view.run_command('lsp_symbol_definition', {'fallback': True})
