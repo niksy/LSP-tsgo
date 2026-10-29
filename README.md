@@ -57,7 +57,7 @@ Other packages, such as [LSP-vue](https://packagecontrol.io/packages/LSP-vue), c
 
 The server uses these content mappers for files outside any tsconfig. It starts them with the `typescript.contentMapper` manifest of their `package.json`.
 
-Other packages can also open a session of the TypeScript API on this server with the `initialize_api_session()` method of the plugin of an `LSP-tsgo` session.
+Other packages can also open a session of the TypeScript API on this server. They send a `custom/initializeAPISession` request to the `LSP-tsgo` session. The response has the API `pipe` and `packageJsonPath`, the `package.json` of the TypeScript installation that runs the server.
 
 ## Go to Source Definition
 

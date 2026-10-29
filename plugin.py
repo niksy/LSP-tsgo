@@ -17,7 +17,6 @@ from LSP.plugin import text_document_position_params
 from LSP.plugin import uri_from_view
 from LSP.plugin import uri_handler
 from LSP.protocol import DocumentUri
-from LSP.protocol import ErrorCodes
 from LSP.protocol import Hover
 from LSP.protocol import HoverParams
 from LSP.protocol import InitializeResult
@@ -57,11 +56,6 @@ class ContentMapperContribution(TypedDict):
     options: NotRequired[dict[str, LSPAny]]
     # Name of the package that contributes the content mapper.
     contributor: NotRequired[str]
-
-
-class TypeScriptApiConnection(TypedDict):
-    pipe: str
-    packageJsonPath: str
 
 
 def find_content_mapper_contributions() -> list[ContentMapperContribution]:
@@ -200,27 +194,6 @@ class LspTsgoPlugin(LspPlugin):
         if isinstance(result, Error):
             log(f'Failed to register content mappers: {result}')
 
-    def initialize_api_session(self) -> Promise[TypeScriptApiConnection | Error]:
-        """
-        Opens a session of the TypeScript API on this server, for other packages (e.g. LSP-vue). Resolves with the API
-        pipe and the `package.json` of the TypeScript installation that runs this server.
-        """
-        session = self.weaksession()
-        if not session:
-            return Promise.resolve(Error(ErrorCodes.InternalError, 'TypeScript server is not running'))
-        package_json = self._get_typescript_package_json(session)
-        if not package_json:
-            return Promise.resolve(Error(ErrorCodes.InternalError, 'Cannot find package.json of the TypeScript server'))
-
-        def on_result(result: dict[str, Any] | Error | None) -> TypeScriptApiConnection | Error:
-            if isinstance(result, Error):
-                return result
-            if not result or not isinstance(result.get('pipe'), str):
-                return Error(ErrorCodes.InternalError, 'TypeScript server returned no API pipe')
-            return {'pipe': result['pipe'], 'packageJsonPath': str(package_json)}
-
-        return session.send_request_task(Request('custom/initializeAPISession', {})).then(on_result)
-
     def _get_typescript_package_json(self, session: Session) -> Path | None:
         server_path = session.config.root_settings.get('server_path')
         if not server_path or server_path == 'auto':
@@ -258,6 +231,21 @@ class LspTsgoPlugin(LspPlugin):
         if response['method'] == 'textDocument/hover':
             self._verbosity_hover_handler.on_hover_response(cast('VerbosityHover | None', response['result']))
             return
+        if response['method'] == 'custom/initializeAPISession':
+            self._on_initialize_api_session_response(response)
+            return
+
+    def _on_initialize_api_session_response(self, response: ServerResponse) -> None:
+        """
+        Other packages (e.g. LSP-vue) open a session of the TypeScript API with a `custom/initializeAPISession` request
+        to this server. Add the `package.json` of the TypeScript installation that runs this server to the response.
+        """
+        result = response['result']
+        session = self.weaksession()
+        if not isinstance(result, dict) or not session:
+            return
+        if package_json := self._get_typescript_package_json(session):
+            result['packageJsonPath'] = str(package_json)
 
     @uri_handler('verbosity')
     def handle_verbosity_uri(self, uri: DocumentUri, _: sublime.NewFileFlags) -> Promise[sublime.Sheet | None]:
