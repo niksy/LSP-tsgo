@@ -14,6 +14,51 @@ TypeScript and JavaScript support for Sublime's LSP plugin provided through [typ
 
 Open the configuration file using the Command Palette `Preferences: LSP-tsgo Settings` command or open it from the Sublime menu.
 
+## Content mappers
+
+TypeScript 7.1 can type-check other file types, such as Vue single-file components, through the content mappers in the `contentMappers` field of a tsconfig. Content mappers run code from the project's `node_modules`, so they are disabled by default. Enable them for a trusted project in its `.sublime-project` file:
+
+```jsonc
+{
+    "settings": {
+        "LSP": {
+            "LSP-tsgo": {
+                "initialization_options": {
+                    "runExternalCode": true
+                }
+            }
+        }
+    }
+}
+```
+
+Content mappers run on the same Node.js as the server.
+
+### Contributing content mappers from other packages
+
+Other packages, such as [LSP-vue](https://packagecontrol.io/packages/LSP-vue), can contribute content mappers with a `typescript-content-mappers.json` file in the package root:
+
+```jsonc
+[
+    {
+        // Name of the content mapper's npm package.
+        "name": "@vue/content-mapper",
+        // Directory containing the package.
+        "location": "${storage_path}/LSP-vue/server/node_modules/",
+        // File extensions that the content mapper handles.
+        "extensions": [".vue"],
+        // Views that this server attaches to when `runExternalCode` is enabled.
+        "selector": "text.html.vue",
+        // Content mapper options for files outside any tsconfig.
+        "options": { "format": "sfc" }
+    }
+]
+```
+
+The server uses these content mappers for files outside any tsconfig. It starts them with the `typescript.contentMapper` manifest of their `package.json`.
+
+Other packages can also open a session of the TypeScript API on this server with the `initialize_api_session()` method of the plugin of an `LSP-tsgo` session.
+
 ## Go to Source Definition
 
 `LSP: Goto Definition` on a symbol from a dependency lands in its `.d.ts`. The `LSP-tsgo: Goto Source Definition` command (`lsp_tsgo_goto_source_definition`) asks the server for the implementation behind that declaration instead: the `.js` shipped next to the typings, or the original `.ts` when a declaration map is available. When the server has nothing to map (the symbol is already in source, or the server is too old to support the request) the command falls back to the ordinary definition, so it can take over a definition key binding:
