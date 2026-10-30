@@ -43,8 +43,6 @@ Other packages, such as [LSP-vue](https://packagecontrol.io/packages/LSP-vue), c
     {
         // Name of the content mapper's npm package.
         "name": "@vue/content-mapper",
-        // Directory containing the package.
-        "location": "${storage_path}/LSP-vue/server/node_modules/",
         // File extensions that the content mapper handles.
         "extensions": [".vue"],
         // Views that this server attaches to, unless `runExternalCode` is disabled.
@@ -53,6 +51,15 @@ Other packages, such as [LSP-vue](https://packagecontrol.io/packages/LSP-vue), c
         "options": { "format": "sfc" }
     }
 ]
+```
+
+Once the content mapper is installed, and before every start of the package's server, the package reports the directory containing the content mapper's npm package, usually a `node_modules` directory:
+
+```py
+sublime.run_command('lsp_tsgo_set_content_mapper_location', {
+    'name': '@vue/content-mapper',
+    'location': str(server_directory / 'node_modules'),
+})
 ```
 
 The server uses these content mappers for files outside any tsconfig. It starts them with the `typescript.contentMapper` manifest of their `package.json`.

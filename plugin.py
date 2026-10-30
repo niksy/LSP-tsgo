@@ -12,7 +12,6 @@ from LSP.plugin import Promise
 from LSP.plugin import Request
 from LSP.plugin import ServerResponse
 from LSP.plugin import Session
-from LSP.plugin import ST_STORAGE_PATH
 from LSP.plugin import text_document_position_params
 from LSP.plugin import uri_from_view
 from LSP.plugin import uri_handler
@@ -33,9 +32,11 @@ from typing import final
 from typing import TypedDict
 from typing_extensions import NotRequired
 from typing_extensions import override
+from weakref import WeakSet
 import json
 import os
 import sublime
+import sublime_plugin
 
 
 def log(message: str) -> None:
@@ -46,8 +47,6 @@ class ContentMapperContribution(TypedDict):
     """An entry of a `typescript-content-mappers.json` file that another package contributes."""
     # Name of the content mapper's npm package.
     name: str
-    # Directory containing the package, usually a `node_modules` directory. Supports the `${storage_path}` variable.
-    location: str
     # File extensions that the content mapper handles.
     extensions: list[str]
     # Selector of the views that this server attaches to, for the files that the content mapper handles.
@@ -59,7 +58,6 @@ class ContentMapperContribution(TypedDict):
 
 
 def find_content_mapper_contributions() -> list[ContentMapperContribution]:
-    variables = {'storage_path': ST_STORAGE_PATH}
     contributions: list[ContentMapperContribution] = []
     for resource in ResourcePath.glob_resources('typescript-content-mappers.json'):
         try:
@@ -73,7 +71,6 @@ def find_content_mapper_contributions() -> list[ContentMapperContribution]:
         for entry in cast('list[ContentMapperContribution]', contributed):
             contribution: ContentMapperContribution = {
                 'name': entry['name'],
-                'location': cast('str', sublime.expand_variables(entry['location'], variables)),
                 'extensions': entry['extensions'],
                 'contributor': resource.parts[1],
             }
@@ -85,20 +82,22 @@ def find_content_mapper_contributions() -> list[ContentMapperContribution]:
     return contributions
 
 
-def content_mapper_path(contribution: ContentMapperContribution) -> Path:
-    return Path(contribution['location']) / contribution['name']
-
-
-def to_server_contribution(contribution: ContentMapperContribution) -> dict[str, LSPAny] | None:
+def to_server_contribution(contribution: ContentMapperContribution, location: str) -> dict[str, LSPAny] | None:
     """
     Converts a contribution to the format of `custom/setContentMapperContributions`, with the manifest from the
     `typescript.contentMapper` field of the content mapper's `package.json`.
+
+    :param location: The directory containing the content mapper's package, as reported by its contributor.
     """
-    package_path = content_mapper_path(contribution)
+    package_path = Path(location) / contribution['name']
     try:
         package_json = json.loads((package_path / 'package.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError) as error:
+        log(f'Ignoring content mapper with an unreadable package.json at "{package_path}": {error}')
+        return None
+    try:
         manifest = package_json['typescript']['contentMapper']
-    except (OSError, ValueError, KeyError, TypeError):
+    except (KeyError, TypeError):
         log(f'Ignoring content mapper without a manifest at "{package_path}"')
         return None
     server_manifest: dict[str, LSPAny] = {
@@ -125,6 +124,9 @@ def to_server_contribution(contribution: ContentMapperContribution) -> dict[str,
 @final
 class LspTsgoPlugin(LspPlugin):
     content_mapper_contributions: list[ContentMapperContribution] | None = None
+    # Directories containing the content mappers, by name. Reported by the contributors once they know them.
+    content_mapper_locations: dict[str, str] = {}
+    initialized_plugins: WeakSet[LspTsgoPlugin] = WeakSet()
     resolved_server_direcotry: Path | None = None
 
     @classmethod
@@ -173,16 +175,35 @@ class LspTsgoPlugin(LspPlugin):
             cls.content_mapper_contributions = find_content_mapper_contributions()
         return cls.content_mapper_contributions
 
+    @classmethod
+    def set_content_mapper_location_async(cls, name: str, location: str) -> None:
+        if cls.content_mapper_locations.get(name) == location:
+            return
+        cls.content_mapper_locations[name] = location
+        for plugin in cls.initialized_plugins:
+            plugin._register_content_mappers_async()
+
     @override
     def on_initialized_async(self) -> None:
+        self.initialized_plugins.add(self)
+        self._register_content_mappers_async()
+
+    def _register_content_mappers_async(self) -> None:
+        """
+        Registers the contributed content mappers for files outside any tsconfig. The request replaces the previously
+        registered ones, so it includes all with a known location.
+        """
         session = self.weaksession()
         if not session or not session.config.initialization_options.get('runExternalCode'):
             return
-        contributions = self._get_content_mapper_contributions()
+        locations = self.content_mapper_locations
+        contributions = [c for c in self._get_content_mapper_contributions() if c['name'] in locations]
         if not contributions:
             return
-        # Registers the contributed content mappers for files outside any tsconfig.
-        server_contributions = [c for c in map(to_server_contribution, contributions) if c]
+        server_contributions = [
+            server_contribution for c in contributions
+            if (server_contribution := to_server_contribution(c, locations[c['name']]))
+        ]
         extensions = tuple(extension for c in contributions for extension in c['extensions'])
         open_documents = [
             {'uri': uri} for sb in session.session_buffers_async()
@@ -319,6 +340,13 @@ class VerbosityHoverHandler:
             view = session_buffer.get_view_in_group()
             point = position_to_offset(view, hover_params['position'])
             view.run_command('lsp_hover', {'point': point})
+
+
+class LspTsgoSetContentMapperLocationCommand(sublime_plugin.WindowCommand):
+    """Called by the packages that contribute content mappers, to report where the content mapper is installed."""
+
+    def run(self, name: str, location: str) -> None:
+        sublime.set_timeout_async(lambda: LspTsgoPlugin.set_content_mapper_location_async(name, location))
 
 
 class LspTsgoGotoSourceDefinitionCommand(LspTextCommand):
