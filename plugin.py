@@ -125,6 +125,7 @@ def to_server_contribution(contribution: ContentMapperContribution) -> dict[str,
 @final
 class LspTsgoPlugin(LspPlugin):
     content_mapper_contributions: list[ContentMapperContribution] | None = None
+    resolved_server_direcotry: Path | None = None
 
     @classmethod
     @override
@@ -148,7 +149,7 @@ class LspTsgoPlugin(LspPlugin):
     @override
     def on_pre_start_async(cls, context: OnPreStartContext) -> None:
         package_name = cls.plugin_storage_path.name
-        NodeManager.on_pre_start_async(
+        resolved_server_direcotry = NodeManager.on_pre_start_async(
             context,
             cls.plugin_storage_path,
             ResourcePath('Packages', package_name, 'server'),
@@ -156,6 +157,8 @@ class LspTsgoPlugin(LspPlugin):
             # Also covers content mappers, which run on the same Node.js (e.g. `@vue/content-mapper`).
             node_version_requirement='^20.19.0 || >=22.12.0',
         )
+        if resolved_server_direcotry:
+            cls.resolved_server_direcotry = resolved_server_direcotry
         # Content mappers start with `node` from the server's PATH. Put the Node.js that runs the server first, so
         # that mappers use the same runtime even if it was installed by lsp_utils and is not on the system PATH.
         node_directory = str(Path(context.variables['node_bin']).parent)
@@ -195,9 +198,9 @@ class LspTsgoPlugin(LspPlugin):
             log(f'Failed to register content mappers: {result}')
 
     def _get_typescript_package_json(self, session: Session) -> Path | None:
-        server_path = session.config.root_settings.get('server_path')
-        if not server_path or server_path == 'auto':
-            return self.plugin_storage_path / 'server' / 'node_modules' / 'typescript' / 'package.json'
+        if self.resolved_server_direcotry:
+            return self.resolved_server_direcotry / 'node_modules' / 'typescript' / 'package.json'
+        server_path = cast(str, session.config.root_settings.get('server_path'))
         # A custom server path points into a TypeScript installation, e.g. `node_modules/typescript/lib/tsc.js`.
         for directory in Path(os.path.expanduser(server_path)).resolve().parents:
             if (package_json := directory / 'package.json').is_file():
@@ -226,7 +229,7 @@ class LspTsgoPlugin(LspPlugin):
 
     def on_server_response_async(self, response: ServerResponse) -> None:
         if response['method'] == 'initialize':
-            self._show_typescript_version(cast('InitializeResult', response['result']))
+            self._show_typescript_version(response['result'])
             return
         if response['method'] == 'textDocument/hover':
             self._verbosity_hover_handler.on_hover_response(cast('VerbosityHover | None', response['result']))
@@ -316,8 +319,6 @@ class VerbosityHoverHandler:
             view = session_buffer.get_view_in_group()
             point = position_to_offset(view, hover_params['position'])
             view.run_command('lsp_hover', {'point': point})
-
-
 
 
 class LspTsgoGotoSourceDefinitionCommand(LspTextCommand):
